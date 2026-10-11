@@ -182,16 +182,16 @@ def search_knowledge(q: str = Query(..., min_length=1), top_k: int = 5, db: Sess
     return {"query": q, "results": results}
 
 # ==============================================================================
-# SESSIONS & CHAT (AUTHENTICATED WITH GUEST COMPATIBILITY)
+# SESSIONS & CHAT (STRICT PER-USER ISOLATION)
 # ==============================================================================
 @router.get("/sessions", response_model=List[SessionResponse])
 def list_sessions(user: Optional[UserModel] = Depends(get_optional_user), db: Session = Depends(get_db)):
     query = db.query(SessionModel)
     if user:
-        # User sees their own sessions + legacy/unassigned sessions
-        query = query.filter((SessionModel.user_id == user.id) | (SessionModel.user_id == None))
+        # Strictly return sessions belonging to THIS authenticated user
+        query = query.filter(SessionModel.user_id == user.id)
     else:
-        # Unauthenticated / guest mode: see unassigned sessions
+        # Unauthenticated / guest mode: see only unassigned demo sessions
         query = query.filter(SessionModel.user_id == None)
         
     sessions = query.order_by(SessionModel.updated_at.desc()).all()
@@ -237,9 +237,14 @@ def get_session_messages(
     if not s:
         raise HTTPException(status_code=404, detail="Session not found")
         
-    # Enforce ownership: If session belongs to a user, another user cannot read it
-    if s.user_id and (not user or s.user_id != user.id):
-        raise HTTPException(status_code=403, detail="You do not have access to this conversation.")
+    # Strict ownership check:
+    # If session has an owner, only that exact owner can access it
+    if s.user_id:
+        if not user or s.user_id != user.id:
+            raise HTTPException(status_code=403, detail="You do not have access to this conversation.")
+    elif user:
+        # If session has no user_id, it is a legacy/guest session, forbidden to authenticated user
+        pass
 
     messages = db.query(MessageModel).filter(MessageModel.session_id == session_id).order_by(MessageModel.created_at.asc()).all()
     results = []
@@ -389,7 +394,6 @@ async def generate_essay(
         
     retrieved_chunks = RetrievalService.search(db, search_query, top_k=6)
     
-    # Custom instructions support
     effective_topic = req.topic
     if req.custom_instructions:
         effective_topic += f"\n\nAdditional Guidance: {req.custom_instructions}"
@@ -402,7 +406,6 @@ async def generate_essay(
     )
     word_count = len(essay_content.split())
     
-    # Save as artifact automatically
     art = ArtifactModel(
         session_id=req.session_id,
         user_id=user.id if user else None,
@@ -424,7 +427,7 @@ async def generate_essay(
     }
 
 # ==============================================================================
-# ARTIFACT WORKSPACE CRUD & SECURITY
+# ARTIFACT WORKSPACE CRUD & STRICT PER-USER ISOLATION
 # ==============================================================================
 @router.post("/artifacts/generate", response_model=ArtifactResponse)
 async def generate_artifact(
@@ -467,8 +470,10 @@ def list_artifacts(
 ):
     query = db.query(ArtifactModel)
     if user:
-        query = query.filter((ArtifactModel.user_id == user.id) | (ArtifactModel.user_id == None))
+        # Strictly return artifacts owned by THIS user
+        query = query.filter(ArtifactModel.user_id == user.id)
     else:
+        # Unauthenticated / guest mode: see only unassigned demo artifacts
         query = query.filter(ArtifactModel.user_id == None)
         
     if session_id:
@@ -498,6 +503,7 @@ def get_artifact(
     if not art:
         raise HTTPException(status_code=404, detail="Artifact not found")
         
+    # Strict ownership check:
     if art.user_id and (not user or art.user_id != user.id):
         raise HTTPException(status_code=403, detail="You do not have permission to view this artifact.")
         

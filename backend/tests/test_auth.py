@@ -69,9 +69,21 @@ def test_user_session_and_artifact_isolation():
     assert sess_a_res.status_code == 200
     sess_a_id = sess_a_res.json()["id"]
 
+    # Verify User A sees Session A in their session list
+    a_sessions = client.get("/api/sessions", headers=headers_a).json()
+    assert any(s["id"] == sess_a_id for s in a_sessions)
+
+    # Verify User B does NOT see Session A in their session list
+    b_sessions = client.get("/api/sessions", headers=headers_b).json()
+    assert not any(s["id"] == sess_a_id for s in b_sessions)
+
     # User B should NOT be able to view messages of Session A
     b_access = client.get(f"/api/sessions/{sess_a_id}/messages", headers=headers_b)
     assert b_access.status_code == 403
+
+    # User B should NOT be able to post messages to Session A
+    b_post = client.post(f"/api/sessions/{sess_a_id}/messages", json={"content": "Hacked post"}, headers=headers_b)
+    assert b_post.status_code == 403
 
     # User B should NOT be able to delete Session A
     b_delete = client.delete(f"/api/sessions/{sess_a_id}", headers=headers_b)
@@ -87,7 +99,15 @@ def test_user_session_and_artifact_isolation():
     assert art_a_res.status_code == 200
     art_a_id = art_a_res.json()["id"]
 
-    # User B should NOT be able to view Artifact A
+    # Verify User A sees Artifact A in their list
+    a_artifacts = client.get("/api/artifacts", headers=headers_a).json()
+    assert any(art["id"] == art_a_id for art in a_artifacts)
+
+    # Verify User B does NOT see Artifact A in their list
+    b_artifacts = client.get("/api/artifacts", headers=headers_b).json()
+    assert not any(art["id"] == art_a_id for art in b_artifacts)
+
+    # User B should NOT be able to view Artifact A directly by ID
     b_art_view = client.get(f"/api/artifacts/{art_a_id}", headers=headers_b)
     assert b_art_view.status_code == 403
 

@@ -21,6 +21,7 @@ export const ArtifactWorkspace: React.FC<Props> = ({
   const [editTitle, setEditTitle] = useState('');
   const [copied, setCopied] = useState(false);
   const [saving, setSaving] = useState(false);
+  const [saveSuccess, setSaveSuccess] = useState(false);
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -30,11 +31,53 @@ export const ArtifactWorkspace: React.FC<Props> = ({
       setEditTitle(artifact.title);
       setViewMode('preview');
       setError(null);
+      setSaveSuccess(false);
       setShowDeleteConfirm(false);
     }
   }, [artifact]);
 
   if (!artifact) return null;
+
+  // Process HTML content to inject client-side broken-image fallback guard in the iframe preview
+  const getRenderContent = () => {
+    if (artifact.content_type !== 'html') return artifact.content;
+    
+    const fallbackScript = `
+      <style>
+        img { max-width: 100%; height: auto; }
+        .img-fallback-box {
+          background: #F8FAFC;
+          border: 2px dashed #CBD5E1;
+          border-radius: 8px;
+          padding: 1.5rem;
+          text-align: center;
+          margin: 1rem 0;
+          font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+        }
+      </style>
+      <script>
+        document.addEventListener("DOMContentLoaded", function() {
+          document.querySelectorAll("img").forEach(function(img) {
+            img.addEventListener("error", function() {
+              var fallback = document.createElement("div");
+              fallback.className = "img-fallback-box";
+              fallback.innerHTML = '<div style="display:inline-block;background:#EEF2FF;color:#6366F1;padding:0.25rem 0.75rem;border-radius:9999px;font-size:0.75rem;font-weight:600;text-transform:uppercase;margin-bottom:0.4rem;">Visual Diagram</div><div style="font-weight:600;color:#1E293B;font-size:0.9rem;">' + (this.alt || "Framework Diagram") + '</div><p style="color:#64748B;font-size:0.8rem;margin-top:0.25rem;margin-bottom:0;">Diagram preview rendered without external assets.</p>';
+              this.parentNode.replaceChild(fallback, this);
+            });
+            // Also trigger check if image already failed to load or has relative dummy path
+            if (img.src && !img.src.startsWith("http") && !img.complete) {
+              img.dispatchEvent(new Event("error"));
+            }
+          });
+        });
+      </script>
+    `;
+
+    if (artifact.content.includes('</body>')) {
+      return artifact.content.replace('</body>', `${fallbackScript}</body>`);
+    }
+    return artifact.content + fallbackScript;
+  };
 
   const handleCopy = () => {
     navigator.clipboard.writeText(artifact.content);
@@ -64,6 +107,8 @@ export const ArtifactWorkspace: React.FC<Props> = ({
         content: editContent,
       });
       if (onArtifactUpdated) onArtifactUpdated(updated);
+      setSaveSuccess(true);
+      setTimeout(() => setSaveSuccess(false), 2500);
       setViewMode('preview');
     } catch (err: any) {
       setError(err.message || 'Failed to save artifact updates.');
@@ -264,6 +309,22 @@ export const ArtifactWorkspace: React.FC<Props> = ({
         </div>
       </div>
 
+      {saveSuccess && (
+        <div style={{
+          padding: '0.5rem 1rem',
+          backgroundColor: '#ECFDF5',
+          color: '#065F46',
+          fontSize: '0.75rem',
+          display: 'flex',
+          alignItems: 'center',
+          gap: '0.35rem',
+          borderBottom: '1px solid #A7F3D0'
+        }}>
+          <Check size={14} color="#10B981" />
+          <span>Artifact changes saved and updated successfully.</span>
+        </div>
+      )}
+
       {/* Delete Confirmation Modal / Banner */}
       {showDeleteConfirm && (
         <div style={{
@@ -346,8 +407,9 @@ export const ArtifactWorkspace: React.FC<Props> = ({
         {viewMode === 'preview' ? (
           artifact.content_type === 'html' ? (
             <iframe
+              key={`iframe-${artifact.id}-${artifact.updated_at || ''}`}
               title="Artifact Preview"
-              srcDoc={artifact.content}
+              srcDoc={getRenderContent()}
               sandbox="allow-scripts"
               style={{
                 width: '100%',
