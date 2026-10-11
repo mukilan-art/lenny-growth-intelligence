@@ -4,7 +4,8 @@ from typing import Optional
 
 class Settings(BaseSettings):
     PROJECT_NAME: str = "Lenny Growth Intelligence"
-    DATABASE_URL: str = os.getenv("DATABASE_URL", "sqlite:///./data/lenny_growth.db")
+    # PostgreSQL is primary default; fallback to SQLite if needed
+    DATABASE_URL: str = os.getenv("DATABASE_URL", "postgresql+psycopg://postgres:postgres@localhost:5432/lenny_growth")
     
     # Auth
     SECRET_KEY: str = os.getenv("SECRET_KEY", "lenny-growth-dev-secret-key-change-in-production-2026")

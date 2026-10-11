@@ -1,4 +1,4 @@
-﻿# Lenny Growth Intelligence
+# Lenny Growth Intelligence
 
 **Lenny Growth Intelligence** is an evidence-first product strategy and growth intelligence workspace that enables founders, product managers, and growth leaders to extract grounded, traceable wisdom from Lenny Rachitsky's podcast transcripts and newsletter archives.
 
@@ -31,9 +31,9 @@
 ## Technology Stack
 
 - **Frontend**: React 19, TypeScript, Vite, `react-markdown`, `remark-gfm`, `lucide-react`.
-- **Backend**: Python 3.13, FastAPI, Pydantic v2, SQLAlchemy, `passlib`, `bcrypt`, `pyjwt`.
-- **Database**: SQLite (default zero-config local persistence in `./data/lenny_growth.db`) or PostgreSQL / pgvector via Docker.
-- **Testing**: `pytest`, `pytest-asyncio`, FastAPI `TestClient`.
+- **Backend**: Python 3.13, FastAPI, Pydantic v2, SQLAlchemy 2.0, `psycopg` (v3), `passlib`, `bcrypt`, `pyjwt`.
+- **Database**: **PostgreSQL** (default primary database via `postgresql+psycopg://...`), with connection pooling (`QueuePool`), automatic table inspection, and indexes. SQLite fallback supported.
+- **Testing**: `pytest`, `pytest-asyncio`, FastAPI `TestClient`, dedicated PostgreSQL suite (`test_postgres_dedicated.py`).
 
 ---
 
@@ -42,6 +42,7 @@
 ### Prerequisites
 - Python 3.10+
 - Node.js 18+ and npm
+- PostgreSQL 14+ (local service, container, or cloud PostgreSQL instance)
 - (Optional) Ollama with `llama3.2` model (`ollama run llama3.2`)
 
 ### 1. Installation
@@ -58,12 +59,12 @@ npm install
 cd ..
 ```
 
-### 2. Environment Configuration
+### 2. Environment & Database Configuration
 
 Copy `.env.example` to `.env`:
 ```ini
 PROJECT_NAME="Lenny Growth Intelligence"
-DATABASE_URL="sqlite:///./data/lenny_growth.db"
+DATABASE_URL="postgresql+psycopg://postgres:postgres@localhost:5432/lenny_growth"
 SECRET_KEY="lenny-growth-dev-secret-key-change-in-production-2026"
 ACCESS_TOKEN_EXPIRE_MINUTES=10080
 
@@ -78,6 +79,18 @@ ANTHROPIC_MODEL="claude-3-5-sonnet-20241022"
 OPENAI_API_KEY=""
 OPENAI_MODEL="gpt-4o"
 ```
+
+#### PostgreSQL Database Setup & Data Migration
+1. Ensure PostgreSQL is running on port 5432.
+2. Create the application database:
+   ```powershell
+   createdb -U postgres lenny_growth
+   ```
+3. Run the automated data migration script to ingest all 60 transcripts (4,193 chunks) into PostgreSQL:
+   ```powershell
+   $env:PYTHONPATH="."
+   .\venv\Scripts\python.exe backend/migrate_data.py
+   ```
 
 ### 3. Running the Application
 
@@ -99,14 +112,14 @@ npm run dev
 
 ## Automated Test Suite
 
-Run the full pytest suite (health, BM25 retrieval, session isolation, artifact generation, authentication, and multi-user data boundaries):
+Run the full 15-test pytest suite against the live PostgreSQL database:
 
 ```powershell
 $env:PYTHONPATH="."
 .\venv\Scripts\pytest backend\tests\ -v
 ```
 
-**Results:**
+**Test Coverage & Results (15/15 Passed):**
 - `test_auth_registration_and_login`: **PASSED**
 - `test_user_session_and_artifact_isolation`: **PASSED**
 - `test_health`: **PASSED**
@@ -115,6 +128,13 @@ $env:PYTHONPATH="."
 - `test_search_knowledge`: **PASSED**
 - `test_session_lifecycle_and_isolation`: **PASSED**
 - `test_artifact_generation`: **PASSED**
+- `test_speaker_specific_retrieval_elena_verna`: **PASSED**
+- `test_speaker_specific_unsupported_person`: **PASSED**
+- `test_chat_response_unsupported_speaker_honesty`: **PASSED**
+- `test_chat_response_supported_speaker_attribution`: **PASSED**
+- `test_postgres_table_creation_and_indexes`: **PASSED**
+- `test_postgres_end_to_end_auth_and_isolation`: **PASSED**
+- `test_postgres_knowledge_retrieval`: **PASSED**
 
 ---
 
@@ -124,3 +144,5 @@ If Docker is available:
 ```bash
 docker compose up --build
 ```
+This automatically brings up PostgreSQL and the Lenny Growth Intelligence backend and frontend containers.
+
