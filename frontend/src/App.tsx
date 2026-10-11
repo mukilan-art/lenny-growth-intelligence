@@ -1,23 +1,37 @@
 ﻿import { useState, useEffect } from 'react';
-import type { Session, Message, KnowledgeStats, ModelsConfig, Artifact } from './types';
+import type { Session, Message, KnowledgeStats, ModelsConfig, Artifact, User } from './types';
 import { api } from './api';
 import { Sidebar } from './components/Sidebar';
 import { ChatWorkspace } from './components/ChatWorkspace';
 import { ArtifactWorkspace } from './components/ArtifactWorkspace';
+import { WritingStudio } from './components/WritingStudio';
+import { EvidenceExplorerPage } from './components/EvidenceExplorerPage';
+import { LandingPage } from './components/LandingPage';
+import { AuthModal } from './components/AuthModal';
 
 export function App() {
+  // Navigation & Authentication
+  const [user, setUser] = useState<User | null>(null);
+  const [showLanding, setShowLanding] = useState<boolean>(true);
+  const [authModalMode, setAuthModalMode] = useState<'login' | 'register' | null>(null);
+  const [activeTab, setActiveTab] = useState<'chat' | 'writing' | 'evidence'>('chat');
+
+  // Application Data State
   const [sessions, setSessions] = useState<Session[]>([]);
   const [activeSessionId, setActiveSessionId] = useState<string | null>(null);
   const [messages, setMessages] = useState<Message[]>([]);
+  const [savedArtifacts, setSavedArtifacts] = useState<Artifact[]>([]);
+  const [activeArtifact, setActiveArtifact] = useState<Artifact | null>(null);
+
+  // System & Model Status
   const [stats, setStats] = useState<KnowledgeStats | null>(null);
   const [modelsConfig, setModelsConfig] = useState<ModelsConfig | null>(null);
   const [selectedProvider, setSelectedProvider] = useState<string>('ollama');
   const [loading, setLoading] = useState<boolean>(false);
-  const [activeArtifact, setActiveArtifact] = useState<Artifact | null>(null);
 
   // Initialize
   useEffect(() => {
-    loadInitialData();
+    checkAuthAndInit();
   }, []);
 
   // When active session changes, load messages
@@ -29,22 +43,43 @@ export function App() {
     }
   }, [activeSessionId]);
 
-  const loadInitialData = async () => {
+  const checkAuthAndInit = async () => {
     try {
-      const [fetchedSessions, fetchedStats, fetchedModels] = await Promise.all([
-        api.listSessions(),
+      const currentUser = await api.getMe();
+      if (currentUser) {
+        setUser(currentUser);
+        setShowLanding(false);
+      }
+
+      const [fetchedStats, fetchedModels] = await Promise.all([
         api.getKnowledgeStats(),
         api.getModelsConfig(),
       ]);
-      setSessions(fetchedSessions);
       setStats(fetchedStats);
       setModelsConfig(fetchedModels);
 
-      if (fetchedSessions.length > 0) {
-        setActiveSessionId(fetchedSessions[0].id);
+      if (currentUser) {
+        await loadUserData();
       }
     } catch (err) {
       console.error('Initialization error:', err);
+    }
+  };
+
+  const loadUserData = async () => {
+    try {
+      const [fetchedSessions, fetchedArtifacts] = await Promise.all([
+        api.listSessions(),
+        api.listArtifacts(),
+      ]);
+      setSessions(fetchedSessions);
+      setSavedArtifacts(fetchedArtifacts);
+
+      if (fetchedSessions.length > 0 && !activeSessionId) {
+        setActiveSessionId(fetchedSessions[0].id);
+      }
+    } catch (err) {
+      console.error('Failed to load user data:', err);
     }
   };
 
@@ -55,6 +90,24 @@ export function App() {
     } catch (err) {
       console.error('Failed to load messages:', err);
     }
+  };
+
+  const handleAuthSuccess = async (authUser: User) => {
+    setUser(authUser);
+    setShowLanding(false);
+    setAuthModalMode(null);
+    await loadUserData();
+  };
+
+  const handleLogout = () => {
+    api.logout();
+    setUser(null);
+    setShowLanding(true);
+    setSessions([]);
+    setMessages([]);
+    setSavedArtifacts([]);
+    setActiveSessionId(null);
+    setActiveArtifact(null);
   };
 
   const handleNewSession = async () => {
@@ -94,7 +147,6 @@ export function App() {
       }
     }
 
-    // Optimistically render user message
     const tempUserMsg: Message = {
       id: `temp_${Date.now()}`,
       session_id: currentSessionId,
@@ -108,7 +160,6 @@ export function App() {
     try {
       const assistantMsg = await api.sendMessage(currentSessionId, content, selectedProvider);
       setMessages((prev) => [...prev, assistantMsg]);
-      // Refresh session title in sidebar
       const updatedSessions = await api.listSessions();
       setSessions(updatedSessions);
     } catch (err) {
@@ -131,6 +182,7 @@ export function App() {
         created_at: new Date().toISOString(),
       };
       setActiveArtifact(artifact);
+      setSavedArtifacts([artifact, ...savedArtifacts]);
     } catch (err) {
       console.error('Failed to generate essay:', err);
     } finally {
@@ -138,11 +190,12 @@ export function App() {
     }
   };
 
-  const handleGenerateArtifact = async (content: string, type: 'html' | 'markdown', title: string) => {
+  const handleGenerateArtifact = async (content: string, type: 'html' | 'markdown' | 'essay', title: string) => {
     setLoading(true);
     try {
       const artifact = await api.generateArtifact(content, type, title, activeSessionId || undefined, selectedProvider);
       setActiveArtifact(artifact);
+      setSavedArtifacts([artifact, ...savedArtifacts]);
     } catch (err) {
       console.error('Failed to generate artifact:', err);
     } finally {
@@ -150,41 +203,104 @@ export function App() {
     }
   };
 
+  const handleArtifactUpdated = (updated: Artifact) => {
+    setActiveArtifact(updated);
+    setSavedArtifacts(savedArtifacts.map((a) => (a.id === updated.id ? updated : a)));
+  };
+
+  const handleArtifactDeleted = (deletedId: string) => {
+    setSavedArtifacts(savedArtifacts.filter((a) => a.id !== deletedId));
+    if (activeArtifact?.id === deletedId) {
+      setActiveArtifact(null);
+    }
+  };
+
+  // If user is on landing page and not signed in
+  if (showLanding && !user) {
+    return (
+      <>
+        <LandingPage
+          onSignIn={() => setAuthModalMode('login')}
+          onGetStarted={() => setAuthModalMode('register')}
+          docCount={stats?.total_documents ?? 60}
+          chunkCount={stats?.total_chunks ?? 4193}
+        />
+        {authModalMode && (
+          <AuthModal
+            initialMode={authModalMode}
+            onSuccess={handleAuthSuccess}
+            onClose={() => setAuthModalMode(null)}
+          />
+        )}
+      </>
+    );
+  }
+
   const activeSession = sessions.find((s) => s.id === activeSessionId) || null;
 
   return (
     <div className="app-container">
       <Sidebar
+        user={user}
+        activeTab={activeTab}
+        onSelectTab={setActiveTab}
         sessions={sessions}
         activeSessionId={activeSessionId}
         onSelectSession={setActiveSessionId}
         onNewSession={handleNewSession}
         onDeleteSession={handleDeleteSession}
+        savedArtifacts={savedArtifacts}
+        onOpenArtifact={setActiveArtifact}
         stats={stats}
         modelsConfig={modelsConfig}
         selectedProvider={selectedProvider}
         onSelectProvider={setSelectedProvider}
+        onLogout={handleLogout}
+        onOpenAuth={() => setAuthModalMode('login')}
       />
 
       <div className="main-content">
         <div className="content-split">
-          <ChatWorkspace
-            activeSession={activeSession}
-            messages={messages}
-            loading={loading}
-            onSendMessage={handleSendMessage}
-            onGenerateEssay={handleGenerateEssay}
-            onGenerateArtifact={handleGenerateArtifact}
-          />
+          {activeTab === 'chat' && (
+            <ChatWorkspace
+              activeSession={activeSession}
+              messages={messages}
+              loading={loading}
+              onSendMessage={handleSendMessage}
+              onGenerateEssay={handleGenerateEssay}
+              onGenerateArtifact={handleGenerateArtifact}
+            />
+          )}
+
+          {activeTab === 'writing' && (
+            <WritingStudio
+              selectedProvider={selectedProvider}
+              onOpenArtifact={setActiveArtifact}
+            />
+          )}
+
+          {activeTab === 'evidence' && (
+            <EvidenceExplorerPage />
+          )}
 
           {activeArtifact && (
             <ArtifactWorkspace
               artifact={activeArtifact}
               onClose={() => setActiveArtifact(null)}
+              onArtifactUpdated={handleArtifactUpdated}
+              onArtifactDeleted={handleArtifactDeleted}
             />
           )}
         </div>
       </div>
+
+      {authModalMode && (
+        <AuthModal
+          initialMode={authModalMode}
+          onSuccess={handleAuthSuccess}
+          onClose={() => setAuthModalMode(null)}
+        />
+      )}
     </div>
   );
 }

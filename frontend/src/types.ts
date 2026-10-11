@@ -1,4 +1,17 @@
-﻿export interface SourceExcerpt {
+﻿export interface User {
+  id: string;
+  email: string;
+  display_name?: string;
+  created_at: string;
+}
+
+export interface AuthResponse {
+  access_token: string;
+  token_type: string;
+  user: User;
+}
+
+export interface SourceExcerpt {
   chunk_id: string;
   document_id: string;
   title: string;
@@ -57,4 +70,5 @@ export interface Artifact {
   content_type: 'markdown' | 'html' | 'essay';
   content: string;
   created_at: string;
+  updated_at?: string;
 }

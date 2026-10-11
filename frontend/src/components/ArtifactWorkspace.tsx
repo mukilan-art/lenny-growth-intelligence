@@ -1,15 +1,38 @@
-﻿import React, { useState } from 'react';
+﻿import React, { useState, useEffect } from 'react';
+import { api } from '../api';
 import type { Artifact } from '../types';
-import { Code, Eye, Copy, Check, Download, ShieldCheck, X } from 'lucide-react';
+import { Code, Eye, Copy, Check, Download, ShieldCheck, X, Edit3, Save, Trash2, AlertCircle } from 'lucide-react';
 
 interface Props {
   artifact: Artifact | null;
   onClose: () => void;
+  onArtifactUpdated?: (updated: Artifact) => void;
+  onArtifactDeleted?: (id: string) => void;
 }
 
-export const ArtifactWorkspace: React.FC<Props> = ({ artifact, onClose }) => {
-  const [viewMode, setViewMode] = useState<'preview' | 'code'>('preview');
+export const ArtifactWorkspace: React.FC<Props> = ({
+  artifact,
+  onClose,
+  onArtifactUpdated,
+  onArtifactDeleted,
+}) => {
+  const [viewMode, setViewMode] = useState<'preview' | 'code' | 'edit'>('preview');
+  const [editContent, setEditContent] = useState('');
+  const [editTitle, setEditTitle] = useState('');
   const [copied, setCopied] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (artifact) {
+      setEditContent(artifact.content);
+      setEditTitle(artifact.title);
+      setViewMode('preview');
+      setError(null);
+      setShowDeleteConfirm(false);
+    }
+  }, [artifact]);
 
   if (!artifact) return null;
 
@@ -21,13 +44,42 @@ export const ArtifactWorkspace: React.FC<Props> = ({ artifact, onClose }) => {
 
   const handleDownload = () => {
     const ext = artifact.content_type === 'html' ? 'html' : 'md';
-    const blob = new Blob([artifact.content], { type: artifact.content_type === 'html' ? 'text/html' : 'text/markdown' });
+    const blob = new Blob([artifact.content], {
+      type: artifact.content_type === 'html' ? 'text/html' : 'text/markdown',
+    });
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
     a.download = `${artifact.title.toLowerCase().replace(/[^a-z0-9]/g, '_')}.${ext}`;
     a.click();
     URL.revokeObjectURL(url);
+  };
+
+  const handleSaveEdit = async () => {
+    setSaving(true);
+    setError(null);
+    try {
+      const updated = await api.updateArtifact(artifact.id, {
+        title: editTitle,
+        content: editContent,
+      });
+      if (onArtifactUpdated) onArtifactUpdated(updated);
+      setViewMode('preview');
+    } catch (err: any) {
+      setError(err.message || 'Failed to save artifact updates.');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const handleDelete = async () => {
+    try {
+      await api.deleteArtifact(artifact.id);
+      if (onArtifactDeleted) onArtifactDeleted(artifact.id);
+      onClose();
+    } catch (err: any) {
+      setError(err.message || 'Failed to delete artifact.');
+    }
   };
 
   return (
@@ -53,37 +105,98 @@ export const ArtifactWorkspace: React.FC<Props> = ({ artifact, onClose }) => {
           }}>
             {artifact.content_type}
           </span>
-          <h3 style={{
-            fontSize: '0.925rem',
-            fontWeight: 600,
-            whiteSpace: 'nowrap',
-            overflow: 'hidden',
-            textOverflow: 'ellipsis',
-            maxWidth: '220px'
-          }}>
-            {artifact.title}
-          </h3>
+          {viewMode === 'edit' ? (
+            <input
+              type="text"
+              value={editTitle}
+              onChange={(e) => setEditTitle(e.target.value)}
+              style={{
+                fontSize: '0.9rem',
+                fontWeight: 600,
+                padding: '0.2rem 0.4rem',
+                borderRadius: '4px',
+                border: '1px solid var(--border-strong)',
+                backgroundColor: 'var(--bg-card)'
+              }}
+            />
+          ) : (
+            <h3 style={{
+              fontSize: '0.925rem',
+              fontWeight: 600,
+              whiteSpace: 'nowrap',
+              overflow: 'hidden',
+              textOverflow: 'ellipsis',
+              maxWidth: '180px'
+            }}>
+              {artifact.title}
+            </h3>
+          )}
         </div>
 
         <div style={{ display: 'flex', alignItems: 'center', gap: '0.25rem' }}>
-          <button
-            onClick={() => setViewMode(viewMode === 'preview' ? 'code' : 'preview')}
-            title={viewMode === 'preview' ? 'View Source Code' : 'View Preview'}
-            style={{
-              background: 'none',
-              border: '1px solid var(--border-subtle)',
-              borderRadius: '4px',
-              padding: '0.35rem 0.5rem',
-              cursor: 'pointer',
-              display: 'flex',
-              alignItems: 'center',
-              gap: '0.25rem',
-              fontSize: '0.75rem'
-            }}
-          >
-            {viewMode === 'preview' ? <Code size={14} /> : <Eye size={14} />}
-            <span>{viewMode === 'preview' ? 'Code' : 'Preview'}</span>
-          </button>
+          {viewMode !== 'edit' ? (
+            <>
+              <button
+                onClick={() => setViewMode(viewMode === 'preview' ? 'code' : 'preview')}
+                title={viewMode === 'preview' ? 'View Source Code' : 'View Preview'}
+                style={{
+                  background: 'none',
+                  border: '1px solid var(--border-subtle)',
+                  borderRadius: '4px',
+                  padding: '0.35rem 0.5rem',
+                  cursor: 'pointer',
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '0.25rem',
+                  fontSize: '0.75rem'
+                }}
+              >
+                {viewMode === 'preview' ? <Code size={14} /> : <Eye size={14} />}
+                <span>{viewMode === 'preview' ? 'Code' : 'Preview'}</span>
+              </button>
+
+              <button
+                onClick={() => setViewMode('edit')}
+                title="Edit Source"
+                style={{
+                  background: 'none',
+                  border: '1px solid var(--border-subtle)',
+                  borderRadius: '4px',
+                  padding: '0.35rem 0.5rem',
+                  cursor: 'pointer',
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '0.25rem',
+                  fontSize: '0.75rem'
+                }}
+              >
+                <Edit3 size={14} />
+                <span>Edit</span>
+              </button>
+            </>
+          ) : (
+            <button
+              onClick={handleSaveEdit}
+              disabled={saving}
+              title="Save Changes"
+              style={{
+                background: 'var(--accent-mint)',
+                color: '#fff',
+                border: 'none',
+                borderRadius: '4px',
+                padding: '0.35rem 0.65rem',
+                cursor: 'pointer',
+                display: 'flex',
+                alignItems: 'center',
+                gap: '0.25rem',
+                fontSize: '0.75rem',
+                fontWeight: 600
+              }}
+            >
+              <Save size={14} />
+              <span>{saving ? 'Saving...' : 'Save'}</span>
+            </button>
+          )}
 
           <button
             onClick={handleCopy}
@@ -122,12 +235,25 @@ export const ArtifactWorkspace: React.FC<Props> = ({ artifact, onClose }) => {
           </button>
 
           <button
+            onClick={() => setShowDeleteConfirm(true)}
+            title="Delete Artifact"
+            style={{
+              background: 'none',
+              border: 'none',
+              padding: '0.35rem',
+              cursor: 'pointer',
+              color: 'var(--text-muted)'
+            }}
+          >
+            <Trash2 size={15} />
+          </button>
+
+          <button
             onClick={onClose}
             title="Close Panel"
             style={{
               background: 'none',
               border: 'none',
-              borderRadius: '4px',
               padding: '0.35rem',
               cursor: 'pointer',
               color: 'var(--text-muted)'
@@ -137,6 +263,68 @@ export const ArtifactWorkspace: React.FC<Props> = ({ artifact, onClose }) => {
           </button>
         </div>
       </div>
+
+      {/* Delete Confirmation Modal / Banner */}
+      {showDeleteConfirm && (
+        <div style={{
+          padding: '0.75rem 1rem',
+          backgroundColor: '#FEF2F2',
+          borderBottom: '1px solid #FCA5A5',
+          display: 'flex',
+          justifyContent: 'space-between',
+          alignItems: 'center',
+          fontSize: '0.8rem',
+          color: '#B91C1C'
+        }}>
+          <span>Are you sure you want to delete this artifact?</span>
+          <div style={{ display: 'flex', gap: '0.5rem' }}>
+            <button
+              onClick={handleDelete}
+              style={{
+                backgroundColor: '#DC2626',
+                color: '#fff',
+                border: 'none',
+                borderRadius: '4px',
+                padding: '0.25rem 0.6rem',
+                fontSize: '0.75rem',
+                fontWeight: 600,
+                cursor: 'pointer'
+              }}
+            >
+              Confirm Delete
+            </button>
+            <button
+              onClick={() => setShowDeleteConfirm(false)}
+              style={{
+                backgroundColor: 'transparent',
+                border: '1px solid #FCA5A5',
+                color: '#B91C1C',
+                borderRadius: '4px',
+                padding: '0.25rem 0.5rem',
+                fontSize: '0.75rem',
+                cursor: 'pointer'
+              }}
+            >
+              Cancel
+            </button>
+          </div>
+        </div>
+      )}
+
+      {error && (
+        <div style={{
+          padding: '0.5rem 1rem',
+          backgroundColor: '#FEF2F2',
+          color: '#B91C1C',
+          fontSize: '0.75rem',
+          display: 'flex',
+          alignItems: 'center',
+          gap: '0.35rem'
+        }}>
+          <AlertCircle size={14} />
+          <span>{error}</span>
+        </div>
+      )}
 
       {/* Security Banner */}
       <div style={{
@@ -153,8 +341,8 @@ export const ArtifactWorkspace: React.FC<Props> = ({ artifact, onClose }) => {
         <span>Sandboxed Execution Context (`sandbox="allow-scripts"`)</span>
       </div>
 
-      {/* Main View Area */}
-      <div style={{ flex: 1, overflow: 'auto', padding: viewMode === 'code' ? '1rem' : '0' }}>
+      {/* View / Edit Area */}
+      <div style={{ flex: 1, overflow: 'auto', padding: viewMode === 'code' || viewMode === 'edit' ? '1rem' : '0' }}>
         {viewMode === 'preview' ? (
           artifact.content_type === 'html' ? (
             <iframe
@@ -173,7 +361,7 @@ export const ArtifactWorkspace: React.FC<Props> = ({ artifact, onClose }) => {
               {artifact.content}
             </div>
           )
-        ) : (
+        ) : viewMode === 'code' ? (
           <pre style={{
             fontFamily: 'var(--font-mono)',
             fontSize: '0.8rem',
@@ -186,6 +374,24 @@ export const ArtifactWorkspace: React.FC<Props> = ({ artifact, onClose }) => {
           }}>
             {artifact.content}
           </pre>
+        ) : (
+          <textarea
+            value={editContent}
+            onChange={(e) => setEditContent(e.target.value)}
+            style={{
+              width: '100%',
+              height: '100%',
+              fontFamily: 'var(--font-mono)',
+              fontSize: '0.825rem',
+              padding: '1rem',
+              borderRadius: '6px',
+              border: '1px solid var(--border-strong)',
+              backgroundColor: 'var(--bg-primary)',
+              color: 'var(--text-primary)',
+              outline: 'none',
+              resize: 'none'
+            }}
+          />
         )}
       </div>
     </div>

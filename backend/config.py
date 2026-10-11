@@ -6,8 +6,12 @@ class Settings(BaseSettings):
     PROJECT_NAME: str = "Lenny Growth Intelligence"
     DATABASE_URL: str = os.getenv("DATABASE_URL", "sqlite:///./data/lenny_growth.db")
     
+    # Auth
+    SECRET_KEY: str = os.getenv("SECRET_KEY", "lenny-growth-dev-secret-key-change-in-production-2026")
+    ACCESS_TOKEN_EXPIRE_MINUTES: int = int(os.getenv("ACCESS_TOKEN_EXPIRE_MINUTES", "10080"))  # 7 days
+    
     # Model configuration
-    DEFAULT_PROVIDER: str = os.getenv("DEFAULT_PROVIDER", "ollama") # "ollama", "anthropic", "openai"
+    DEFAULT_PROVIDER: str = os.getenv("DEFAULT_PROVIDER", "ollama")
     OLLAMA_BASE_URL: str = os.getenv("OLLAMA_BASE_URL", "http://127.0.0.1:11434")
     OLLAMA_MODEL: str = os.getenv("OLLAMA_MODEL", "llama3.2")
     

@@ -1,6 +1,8 @@
 ﻿import React, { useState, useRef, useEffect } from 'react';
 import type { Message, Session } from '../types';
 import { EvidenceExplorer } from './EvidenceExplorer';
+import Markdown from 'react-markdown';
+import remarkGfm from 'remark-gfm';
 import { Send, FileText, Layout, Copy, Check, Sparkles, User, Bot } from 'lucide-react';
 
 interface Props {
@@ -58,7 +60,7 @@ export const ChatWorkspace: React.FC<Props> = ({
             {activeSession ? activeSession.title : 'Research Workspace'}
           </h2>
           <p style={{ fontSize: '0.75rem', color: 'var(--text-muted)', margin: 0 }}>
-            Grounding across 60 Lenny transcripts & newsletters
+            Grounding across 60 Lenny transcripts & newsletters (4,193 searchable chunks)
           </p>
         </div>
 
@@ -176,9 +178,15 @@ export const ChatWorkspace: React.FC<Props> = ({
                   lineHeight: 1.6,
                   fontSize: '0.925rem'
                 }}>
-                  <div style={{ whiteSpace: 'pre-wrap' }}>
-                    {m.content}
-                  </div>
+                  {isUser ? (
+                    <div style={{ whiteSpace: 'pre-wrap' }}>{m.content}</div>
+                  ) : (
+                    <div className="markdown-content" style={{ fontSize: '0.925rem', lineHeight: 1.6 }}>
+                      <Markdown remarkPlugins={[remarkGfm]}>
+                        {m.content}
+                      </Markdown>
+                    </div>
+                  )}
 
                   {/* Grounded Evidence Sources */}
                   {!isUser && m.sources && m.sources.length > 0 && (
@@ -288,7 +296,7 @@ export const ChatWorkspace: React.FC<Props> = ({
             </div>
             <div style={{
               backgroundColor: 'var(--bg-card)',
-              padding: '0.875rem 1.25rem',
+              padding: '0.875rem 12px',
               borderRadius: '12px',
               border: '1px solid var(--border-subtle)',
               fontSize: '0.875rem',
