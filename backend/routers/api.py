@@ -1,4 +1,4 @@
-﻿import json
+import json
 import logging
 from typing import List, Optional
 from fastapi import APIRouter, Depends, HTTPException, Query, status
@@ -17,6 +17,7 @@ from backend.services.auth import (
     get_current_user,
     get_optional_user
 )
+from backend.services.prompt_builder import build_grounded_fallback_response
 
 logger = logging.getLogger("lenny_growth")
 router = APIRouter(prefix="/api")
@@ -302,39 +303,75 @@ async def send_message(
     db.add(user_msg)
     db.commit()
 
-    # Retrieve relevant knowledge
-    retrieved_chunks = RetrievalService.search(db, req.content, top_k=4)
+    # Retrieve knowledge using speaker-specific partitioning
+    partition = RetrievalService.search_with_speaker_partition(db, req.content, top_k=4)
+    targeted_person = partition["targeted_person"]
+    topic = partition["topic"]
+    direct_chunks = partition["direct_evidence"]
+    other_chunks = partition["other_evidence"]
     
-    # Formulate prompt with evidence
-    evidence_text = ""
-    if retrieved_chunks:
-        evidence_lines = []
-        for i, c in enumerate(retrieved_chunks):
-            evidence_lines.append(
-                f"[{i+1}] Episode: \"{c['title']}\" | Speaker: {c['speaker']} ({c['timestamp']})\n"
+    # Combined sources for metadata citation list
+    retrieved_chunks = direct_chunks + other_chunks
+    if not retrieved_chunks:
+        # Fallback to general search if partition returned empty
+        retrieved_chunks = RetrievalService.search(db, req.content, top_k=4)
+    
+    # Formulate prompt with strict evidence boundaries
+    direct_evidence_text = ""
+    if direct_chunks:
+        direct_lines = []
+        for i, c in enumerate(direct_chunks):
+            direct_lines.append(
+                f"[Direct {i+1}] Episode: \"{c['title']}\" | Speaker: {c['speaker']} ({c['timestamp']})\n"
                 f"Excerpt: {c['excerpt']}\n"
             )
-        evidence_text = "\n".join(evidence_lines)
+        direct_evidence_text = "\n".join(direct_lines)
     else:
-        evidence_text = "No direct transcript matches were found in the knowledge base."
+        direct_evidence_text = "NONE (No direct statements found from the requested person)."
+
+    other_evidence_text = ""
+    if other_chunks:
+        other_lines = []
+        for i, c in enumerate(other_chunks):
+            other_lines.append(
+                f"[Other {i+1}] Episode: \"{c['title']}\" | Speaker: {c['speaker']} ({c['timestamp']})\n"
+                f"Excerpt: {c['excerpt']}\n"
+            )
+        other_evidence_text = "\n".join(other_lines)
+    else:
+        other_evidence_text = "NONE."
 
     system_prompt = (
         "You are Lenny Growth Intelligence, an evidence-first AI product strategy advisor. "
-        "Ground your advice strictly on the provided Lenny's Podcast and Newsletter transcript evidence. "
-        "Cite episode titles and speakers by name. If the evidence does not contain sufficient details to answer, "
-        "honestly acknowledge this limitation rather than fabricating facts."
+        "Ground your advice strictly on the provided Lenny's Podcast and Newsletter transcript evidence.\n\n"
+        "STRICT ATTRIBUTION AND ACCURACY RULES:\n"
+        "1. When a user asks what a specific person said or recommended, search the direct evidence for that person's actual statements.\n"
+        "2. If no direct evidence is found for that person, start your response clearly with: "
+        f"\"I couldn't find direct evidence of {targeted_person or '[person]'} discussing {topic or '[topic]'} in the available sources.\"\n"
+        "3. NEVER attribute another speaker's statements, quotes, or opinions to the requested person.\n"
+        "4. If relevant, provide a separate section titled \"Related evidence from other speakers\" and clearly identify each speaker and source.\n"
+        "5. Cite ONLY real retrieved sources. Never fabricate quotes, speaker names, episode titles, or timestamps.\n"
+        "6. Clearly distinguish direct quotations (use quotation marks and timestamps) from paraphrases and synthesis.\n"
+        "7. If the evidence is insufficient to fully answer, explicitly ask whether the user would like to broaden the search."
     )
     
     prompt = f"""
 USER QUESTION:
 {req.content}
 
-RETRIEVED TRANSCRIPT EVIDENCE:
-{evidence_text}
+TARGETED PERSON DETECTED:
+{targeted_person or "None (General product strategy query)"}
+
+DIRECT EVIDENCE FROM REQUESTED PERSON:
+{direct_evidence_text}
+
+RELATED EVIDENCE FROM OTHER ARCHIVED SPEAKERS:
+{other_evidence_text}
 
 INSTRUCTIONS:
-Provide a comprehensive, high-signal, practical answer. Ground each recommendation in the provided quotes and insights.
-Distinguish clearly between direct guest lessons and strategic synthesis.
+Follow all strict attribution rules. If direct evidence for the requested person is NONE, state:
+"I couldn't find direct evidence of {targeted_person or '[person]'} discussing {topic or '[topic]'} in the available sources."
+Then share related evidence under "Related evidence from other speakers" if applicable, and offer to broaden the search.
 """
 
     provider_used = req.provider or "ollama"
@@ -347,11 +384,14 @@ Distinguish clearly between direct guest lessons and strategic synthesis.
         )
     except Exception as e:
         logger.error(f"Inference error: {e}")
-        assistant_content = (
-            f"**Model Execution Notice**: Could not complete request via `{provider_used}`.\n\n"
-            f"**Error Details**: {str(e)}\n\n"
-            "**Retrieved Grounded Evidence from Archive**:\n" +
-            (evidence_text if retrieved_chunks else "No relevant transcript chunks found.")
+        # High-fidelity deterministic fallback adhering strictly to all attribution rules
+        assistant_content = build_grounded_fallback_response(
+            query=req.content,
+            targeted_person=targeted_person,
+            topic=topic,
+            direct_chunks=direct_chunks,
+            other_chunks=other_chunks,
+            error_msg=str(e)
         )
 
     assistant_msg = MessageModel(
