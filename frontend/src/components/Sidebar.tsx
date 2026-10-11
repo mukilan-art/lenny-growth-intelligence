@@ -1,4 +1,4 @@
-﻿import React from 'react';
+import React from 'react';
 import type { Session, KnowledgeStats, ModelsConfig, User, Artifact } from '../types';
 import { MessageSquare, Plus, Trash2, Cpu, Database, PenTool, Search, Layers, LogOut, LogIn } from 'lucide-react';
 
@@ -65,10 +65,10 @@ export const Sidebar: React.FC<Props> = ({
         </div>
         <div>
           <h1 style={{ fontSize: '0.95rem', fontWeight: 700, letterSpacing: '-0.02em', margin: 0 }}>
-            Lenny Growth
+            Lenny Growth Intelligence
           </h1>
           <p style={{ fontSize: '0.75rem', color: 'var(--text-muted)', margin: 0 }}>
-            Evidence Intelligence
+            Evidence-First Strategy
           </p>
         </div>
       </div>
